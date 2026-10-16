@@ -1,112 +1,109 @@
 # Trivia del Día de la Reforma
 
-Aplicación web de trivia en español para partidas presenciales con participantes conectados desde celulares o computadores. El servidor Flask entrega las páginas y valida cada operación; Flask-SocketIO transmite cambios de partida en tiempo real; SQLite conserva partidas, preguntas, participantes y respuestas.
+Aplicación web de trivia interactiva para partidas presenciales o comunitarias con participantes conectados desde sus teléfonos móviles o computadores. Desarrollada para ejecutarse de forma nativa y sin servidores en **Cloudflare Pages** y **Cloudflare D1** (SQLite serverless).
 
-## Requisitos
+---
 
-- Python 3.10 o posterior.
-- Navegador moderno y conexión de red entre participantes y servidor.
-- Para producción: Gunicorn detrás de HTTPS. La aplicación usa el modo `threading` de Socket.IO y `simple-websocket`.
+## 🚀 Arquitectura
 
-## Instalación local
+- **Frontend:** HTML5, CSS moderno y JavaScript nativo servido como assets estáticos por Cloudflare Pages (en `public/`).
+- **Backend:** Cloudflare Pages Functions (en `functions/api/`) para toda la lógica de negocio, autenticación, control de estados y respuestas.
+- **Base de datos:** Cloudflare D1 (SQLite nativo distribuido en el edge) para persistencia de partidas, banco de preguntas, participantes y puntuaciones.
+
+---
+
+## 🛠️ Ejecución y Desarrollo Local
+
+### Requisitos previos
+
+- **Node.js** (v18 o superior) y `npm`.
+
+### 1. Variables de entorno local
+
+Crea o revisa el archivo `.dev.vars` en la raíz del proyecto (este archivo está ignorado en Git):
+
+```ini
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123
+SESSION_SECRET=una-clave-secreta-larga-para-desarrollo
+```
+
+### 2. Inicializar la base de datos local (D1)
+
+Ejecuta el script SQL con el esquema y el banco inicial de preguntas:
 
 ```bash
-cd trivia
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-cp .env.example .env
+npx wrangler d1 execute trivia-db --local --file=schema.sql
 ```
 
-Edita `.env`: define un `SECRET_KEY` aleatorio largo, un usuario y una contraseña de administrador segura. En una terminal Bash, carga los valores antes de iniciar:
+### 3. Iniciar el servidor de desarrollo
+
+Para escuchar en localhost y en tu red local (útil para probar con teléfonos en la misma WiFi):
 
 ```bash
-set -a
-source .env
-set +a
-export SESSION_COOKIE_SECURE=0
-python run.py
+npx wrangler pages dev public --d1=DB=trivia-db --ip 0.0.0.0 --port 8788
 ```
 
-La base SQLite y las tablas se crean automáticamente al iniciar por primera vez en `instance/trivia.sqlite3`. El primer juego aparece como **Trivia Día de la Reforma**. No hay claves predeterminadas habilitadas: el acceso administrativo queda desactivado hasta configurar `ADMIN_PASSWORD`.
+Rutas locales:
+- **Participantes:** `http://localhost:8788/` (o con tu IP local: `http://TU_IP:8788/`)
+- **Administración:** `http://localhost:8788/admin/`
+- **Proyección:** `http://localhost:8788/admin/proyeccion/`
 
-Abre:
+*(Credenciales de prueba local: Usuario `admin`, Contraseña `admin123`)*.
 
-- Participantes: `http://127.0.0.1:5000/`
-- Administración: `http://127.0.0.1:5000/admin`
-- Proyección (después de iniciar sesión en administración): `http://127.0.0.1:5000/admin/proyeccion`
+---
 
-## Primera partida
+## ☁️ Despliegue en Cloudflare Pages
 
-1. Inicia sesión en `/admin` con las credenciales de `.env`.
-2. Define si la ronda tendrá 10, 15 o 20 preguntas. No hace falta elegirlas: al comenzar se sortean del banco completo.
-3. Pulsa **Comenzar partida**. Esto sortea y prepara la ronda, pero aún no muestra la pregunta.
-4. Comparte la URL pública. Los participantes ingresan con su apodo; la página los lleva directamente a la única partida activa.
-5. Pulsa **Iniciar pregunta** cuando quieras mostrarla. Cada participante selecciona una alternativa y confirma una vez.
-6. Pulsa **Cerrar pregunta** para bloquear respuestas. Si hay personas pendientes, el panel pide confirmar. Tras el cierre se revela la alternativa correcta y la explicación.
-7. Si los puntajes más altos empatan al finalizar la ronda, se agrega automáticamente una pregunta de desempate. Iníciala desde el panel; se seguirán agregando preguntas mientras persista el empate.
-8. Si quieres, activa **Mostrar clasificación en la proyección después de cada pregunta**. Pulsa **Finalizar partida** para mostrar los tres puntajes más altos y el podio animado a todos los participantes.
+### Paso 1: Crear la Base de Datos D1
+1. En el panel de Cloudflare, ve a **Storage & databases** > **D1 SQL Database** > **Create database**.
+2. Nómbrala `trivia-db`.
+3. Ve a la pestaña **Console** de `trivia-db` en el dashboard web y pega todo el contenido de [`schema.sql`](schema.sql), luego pulsa **Execute**.
+   *(Alternativa por terminal: `npx wrangler d1 execute trivia-db --remote --file=schema.sql`)*.
 
-La puntuación es un punto por respuesta correcta confirmada y cero por respuesta incorrecta o ausente. El cierre y la confirmación de respuesta se serializan con una transacción SQLite (`BEGIN IMMEDIATE`), que determina qué operación se acepta primero.
+### Paso 2: Crear el Proyecto en Pages
+1. Ve a **Workers & Pages** > **Create application** > pestaña **Pages** > **Connect to Git**.
+2. Selecciona tu repositorio de GitHub.
+3. Configuración de Build:
+   - **Framework preset:** `None`
+   - **Build command:** *(dejar vacío)*
+   - **Build output directory:** `public`
+4. Pulsa **Save and Deploy**.
 
-## Administrar el banco
+### Paso 3: Configurar Bindings y Variables
+En el panel del proyecto en Cloudflare Pages:
+1. **Settings** > **Bindings**:
+   - Pulsa **Add binding** > **D1 database binding**.
+   - **Variable name:** `DB` *(exactamente en mayúsculas)*.
+   - **D1 database:** Selecciona `trivia-db`.
+2. **Settings** > **Environment variables**:
+   - `ADMIN_USERNAME`: tu usuario administrador (ej. `admin`).
+   - `ADMIN_PASSWORD`: contraseña del administrador (marca la opción *Encrypt* / Secreto).
+   - `SESSION_SECRET`: cadena aleatoria larga para firmar las sesiones.
+3. En la pestaña **Deployments**, haz clic en **Retry deployment** del último despliegue para aplicar los bindings.
 
-El banco inicial trae 53 preguntas organizadas por categoría y dificultad, con explicación y referencia. Desde `/admin` puedes crear, editar o eliminar preguntas aún no utilizadas. Para ajustar el contenido local, prioriza las fuentes incluidas y revisa las formulaciones teológicas según la tradición de la congregación. Las preguntas incluidas sobre historia chilena enlazan a registros de la Biblioteca del Congreso Nacional, Biblioteca Metodista Chile y estudios académicos; el detalle histórico puede variar según denominación, por lo que el administrador puede editar el banco antes de usarlo.
+---
 
-El sorteo copia preguntas a la partida. Una vez utilizada una pregunta, el sistema conserva su copia y bloquea la edición de la pregunta original para mantener intactos los resultados históricos. Crear otra partida cierra cualquier partida que siga abierta; así solo queda una partida activa.
+## 🎮 Flujo de Partida
 
-## Pruebas
+1. **Acceso:** El administrador ingresa a `/admin/` con sus credenciales.
+2. **Configuración:** Define si la ronda tendrá 10, 15 o 20 preguntas (se sortean aleatoriamente del banco al comenzar).
+3. **Inicio:** Pulsa **Comenzar partida**. Los participantes se unen ingresando un apodo en la página principal (`/`).
+4. **Preguntas:**
+   - Pulsa **Iniciar pregunta** para abrirla a los jugadores.
+   - Los participantes eligen una alternativa y confirman.
+   - Pulsa **Cerrar pregunta** para bloquear respuestas y revelar la correcta con su explicación bíblica/histórica.
+5. **Desempate automático:** Si los primeros lugares empatan en puntos al terminar la ronda, el sistema añade preguntas de desempate hasta desempatar el 1.er lugar.
+6. **Finalización y Podio:** Al pulsar **Finalizar partida**, la pantalla de participantes y la proyección muestran el podio animado con los ganadores.
 
-```bash
-source .venv/bin/activate
-python -m unittest discover -s tests -v
-```
+---
 
-Las pruebas cubren registro y nombres duplicados, aislamiento de rutas administrativas, token CSRF, visibilidad y cierre de preguntas, respuestas únicas, puntajes, reconexión, persistencia, sorteo y tamaño de ronda, desempates, podio público, Socket.IO y al menos 50 preguntas semilla.
+## 📚 Banco de Preguntas
 
-## Despliegue con Gunicorn
+Incluye más de 50 preguntas temáticas sobre:
+- Historia de la Reforma (Lutero, Calvino, Zuinglio, 95 tesis, Dieta de Worms).
+- Principios teológicos (Las 5 Solas).
+- Conocimiento bíblico general.
+- Historia del cristianismo y su desarrollo histórico en Chile.
 
-Configura las variables de entorno en el gestor de procesos; no guardes `.env` en el repositorio. `SESSION_COOKIE_SECURE` está activado por defecto y debe mantenerse así en producción, por lo que el sitio debe servirse sobre HTTPS. En local se desactiva solo para permitir cookies sobre HTTP.
-
-Comando de referencia para un servidor de un solo nodo:
-
-```bash
-gunicorn --worker-class gthread --workers 1 --threads 100 --bind 127.0.0.1:8000 run:app
-```
-
-Mantén un worker para este despliegue SQLite de un solo proceso. El proceso `run:app` exporta la aplicación Flask y `run.py` inicializa Flask-SocketIO con transporte compatible con WebSocket. Configura un proxy para preservar `Upgrade` y `Connection` en WebSocket y usar HTTPS. Ejemplo en [`deploy/nginx.conf`](deploy/nginx.conf).
-
-La base de datos se guarda en disco local y debe incluirse en respaldos. No uses una carpeta temporal o efímera para `DATABASE_PATH`. Para escalar a varios workers o servidores, hará falta incorporar un backend compartido de Socket.IO y evaluar una base de datos cliente-servidor; esta primera versión está deliberadamente diseñada para una instancia.
-
-## Seguridad y operación
-
-- Las contraseñas de administración y el secreto Flask vienen de variables de entorno.
-- Los tokens de participante son aleatorios; SQLite guarda su hash, no el token.
-- Las escrituras validan CSRF, identidad, pertenencia a partida y estado actual en el servidor.
-- Los nombres se comparan tras normalización Unicode y sin distinguir mayúsculas.
-- Para conexiones remotas, configura firewall, HTTPS, límites de solicitudes en el proxy y una contraseña administrativa robusta.
-- La base se inicializa automáticamente. Haz una copia antes de actualizaciones o cambios manuales.
-
-## Fuentes temáticas consultadas
-
-- [HISTORY: Martin Luther and the 95 Theses](https://www.history.com/articles/martin-luther-and-the-95-theses): fecha tradicional y matiz histórico sobre el relato de la puerta de Wittenberg.
-- [Ley de 27 de julio de 1865, Biblioteca del Congreso Nacional](https://www.bcn.cl/leychile/Navegar?idNorma=131712&idVersion=1865-07-27): texto legal sobre culto no católico en recintos particulares.
-- [Biblioteca Metodista Chile: historia de la Iglesia Metodista de Valparaíso](https://bibliotecametodista.cl/iglesias/norte-verde/valparaiso/).
-- [Estudio sobre revistas pentecostales en Chile, SciELO](https://www.scielo.cl/scielo.php?pid=S0718-47272024000100213&script=sci_arttext).
-- Las referencias bíblicas se citan por libro y versículo; el panel permite adaptarlas a la versión bíblica que use la congregación.
-
-## Estructura
-
-```text
-app/
-  db.py                 esquema SQLite e inicialización
-  routes.py             páginas y API HTTP
-  sockets.py            conexión, presencia y salas en tiempo real
-  seed.py               banco inicial temático
-  templates/            participante, administración y proyección
-  static/               JavaScript y estilos responsivos
-tests/                   pruebas automatizadas
-deploy/nginx.conf        ejemplo de proxy WebSocket
-config.py                configuración por variables de entorno
-run.py                   punto de entrada Flask y Socket.IO
-```
+Desde `/admin/` se pueden crear nuevas preguntas o editar las existentes que aún no hayan sido utilizadas.

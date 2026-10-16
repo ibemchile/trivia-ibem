@@ -1,9 +1,12 @@
-name = "trivia-reforma"
+name = "trivia-ibem"
+main = "functions/index.js"
 compatibility_date = "2024-10-01"
-pages_build_output_dir = "public"
+
+[assets]
+directory = "public"
+binding = "ASSETS"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "trivia-db"
-database_id = "LOCAL_OR_REMOTE_ID"
-
+database_id = "trivia-db"
