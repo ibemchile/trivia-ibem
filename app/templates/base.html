@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf }}"><title>{% block title %}Trivia Biblica dia de la Reforma{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+</head>
+<body data-page="{{ page|default('') }}">
+  <header class="topbar">
+    <!-- <a class="brand" href="/">✦ Trivia Reforma</a> -->
+    <img class="site-logo" src="{{ url_for('static', filename='img/logo.png') }}" alt="Trivia Bíblica · Día de la Reforma">
+  </header>
+<main>{% block body %}{% endblock %}</main><div id="toast" role="status" aria-live="polite"></div></body></html>
