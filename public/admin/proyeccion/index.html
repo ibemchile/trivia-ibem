@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Proyección · Trivia Reforma</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body data-page="projection">
+  <main class="projection">
+    <div class="projection-brand">✦ DÍA DE LA REFORMA</div>
+    <div id="projection-wait" class="center">
+      <span class="eyebrow">Trivia congregacional</span>
+      <h1>Esperando la siguiente pregunta</h1>
+      <p>El administrador iniciará la pregunta cuando esté todo listo.</p>
+    </div>
+    <div id="projection-question" class="hidden">
+      <div class="eyebrow" id="projection-meta"></div>
+      <h1 id="projection-text"></h1>
+      <div id="projection-options" class="projection-options"></div>
+      <div id="projection-closed" class="feedback hidden"></div>
+      <section id="projection-after-board" class="hidden">
+        <h2>Clasificación acumulada</h2>
+        <div id="projection-board"></div>
+      </section>
+    </div>
+    <div id="projection-final" class="hidden">
+      <h1>Resultados finales</h1>
+      <div id="projection-leaderboard"></div>
+    </div>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
+

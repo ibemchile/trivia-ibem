@@ -9,6 +9,8 @@ env/
 
 # Environment and secrets
 .env
+.dev.vars
+.wrangler/
 
 # Database and runtime data
 instance/*

@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administración · Trivia Reforma</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body data-page="admin">
+  <header class="topbar">
+    <img class="site-logo" src="/img/logo.png" alt="Trivia Bíblica · Día de la Reforma">
+  </header>
+  <main>
+    <section class="hero">
+      <span class="eyebrow">Panel de control</span>
+      <h1>Administra la trivia</h1>
+      <p>Organiza el banco, coordina las preguntas y sigue las respuestas en vivo.</p>
+    </section>
+
+    <section id="login" class="card narrow">
+      <h2>Acceso administrador</h2>
+      <form id="login-form">
+        <label>Usuario
+          <input id="username" required autocomplete="username">
+        </label>
+        <label>Contraseña
+          <input id="password" type="password" required autocomplete="current-password">
+        </label>
+        <button class="primary">Iniciar sesión</button>
+      </form>
+      <p id="login-error" class="error"></p>
+    </section>
+
+    <div id="dashboard" class="hidden">
+      <section class="card">
+        <div class="toolbar">
+          <div>
+            <span class="eyebrow">Partida</span>
+            <h2 id="game-name">Trivia</h2>
+          </div>
+          <div class="actions">
+            <select id="admin-game-select"></select>
+            <button id="new-game" class="secondary">＋ Nueva partida</button>
+            <a class="button secondary" target="_blank" href="/admin/proyeccion">Abrir proyección ↗</a>
+            <button id="logout" class="plain">Salir</button>
+          </div>
+        </div>
+        <label class="inline-setting">
+          <input id="show-leaderboard" type="checkbox"> Mostrar clasificación en la proyección después de cada pregunta
+        </label>
+        <div class="stats">
+          <div><strong id="stat-status">—</strong><span>Estado</span></div>
+          <div><strong id="stat-people">0</strong><span>Participantes</span></div>
+          <div><strong id="stat-connected">0</strong><span>Activos</span></div>
+          <div><strong id="stat-answers">0</strong><span>Respondieron</span></div>
+          <div><strong id="stat-pending">0</strong><span>Pendientes</span></div>
+        </div>
+        <div class="round-settings">
+          <label>Preguntas de la ronda
+            <select id="round-size">
+              <option value="10">10 preguntas</option>
+              <option value="15">15 preguntas</option>
+              <option value="20">20 preguntas</option>
+            </select>
+          </label>
+          <button id="save-round-size" class="secondary">Guardar cantidad</button>
+          <span id="round-summary" class="pill muted"></span>
+        </div>
+        <div class="control-bar">
+          <button id="flow-btn" data-action="start-game" class="primary">Comenzar partida</button>
+          <button id="finish-btn" data-action="finish-game" class="danger">Finalizar partida</button>
+        </div>
+        <div id="current-admin-question" class="question-admin"></div>
+      </section>
+
+      <section class="grid-two">
+        <div class="card">
+          <div class="toolbar">
+            <h2>Participantes</h2>
+            <span class="pill">En vivo</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Conexión</th>
+                  <th>Respuesta</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="participants-table"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Clasificación</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Participante</th>
+                  <th>Puntos</th>
+                  <th>Correctas</th>
+                  <th>Respondidas</th>
+                  <th>Sin respuesta</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="toolbar">
+          <div>
+            <h2>Preguntas de esta partida</h2>
+            <p>El sistema sortea automáticamente las preguntas desde el banco completo al comenzar.</p>
+          </div>
+        </div>
+        <div id="question-list" class="question-list"></div>
+      </section>
+
+      <section class="card">
+        <h2>Banco de preguntas</h2>
+        <p>Crea o edita preguntas para futuras partidas. Las preguntas utilizadas se conservan intactas.</p>
+        <form id="question-form" class="question-form">
+          <input type="hidden" id="edit-id">
+          <label class="span-two">Enunciado
+            <textarea id="q-text" maxlength="500" required></textarea>
+          </label>
+          <label>Alternativa A
+            <input id="opt-a" required>
+          </label>
+          <label>Alternativa B
+            <input id="opt-b" required>
+          </label>
+          <label>Alternativa C
+            <input id="opt-c" required>
+          </label>
+          <label>Alternativa D
+            <input id="opt-d" required>
+          </label>
+          <label>Correcta
+            <select id="correct">
+              <option>A</option>
+              <option>B</option>
+              <option>C</option>
+              <option>D</option>
+            </select>
+          </label>
+          <label>Categoría
+            <input id="category" value="Historia de la Reforma">
+          </label>
+          <label>Dificultad
+            <select id="difficulty">
+              <option>Básica</option>
+              <option>Intermedia</option>
+              <option>Avanzada</option>
+            </select>
+          </label>
+          <label>Explicación
+            <input id="explanation" maxlength="500">
+          </label>
+          <label>Fuente o referencia
+            <input id="source" maxlength="300">
+          </label>
+          <div class="span-two actions">
+            <button class="primary">Guardar pregunta</button>
+            <button type="button" id="cancel-edit" class="secondary">Limpiar</button>
+          </div>
+        </form>
+        <div id="bank-list" class="bank-list"></div>
+      </section>
+    </div>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
+
