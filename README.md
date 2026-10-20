@@ -93,7 +93,7 @@ En el panel del proyecto en Cloudflare Pages:
    - Pulsa **Iniciar pregunta** para abrirla a los jugadores.
    - Los participantes eligen una alternativa y confirman.
    - Pulsa **Cerrar pregunta** para bloquear respuestas y revelar la correcta con su explicación bíblica/histórica.
-5. **Desempate automático:** Si los primeros lugares empatan en puntos al terminar la ronda, el sistema añade preguntas de desempate hasta desempatar el 1.er lugar.
+5. **Desempate automático:** Si un empate afecta al podio, el sistema añade otra pregunta cuando los participantes empatados también coinciden en el resultado y tiempo de su último desempate. Esto incluye un empate entre el 3.º y 4.º puesto, porque afecta quién aparece en el podio.
 6. **Finalización y Podio:** Al pulsar **Finalizar partida**, la pantalla de participantes y la proyección muestran el podio animado con los ganadores.
 
 ---

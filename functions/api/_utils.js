@@ -69,29 +69,37 @@ export async function getLeaderboard(db, gid) {
   const { results } = await db.prepare(`
     SELECT p.id, p.nickname,
       COALESCE(SUM(a.points_awarded), 0) as score,
-      COALESCE(SUM(a.is_correct), 0) as correct,
       COUNT(a.id) as answered,
-      (SELECT COUNT(*) FROM questions q WHERE q.game_id = ? AND q.status IN ('closed', 'open')) - COUNT(a.id) as unanswered
+      (SELECT COUNT(*) FROM questions q WHERE q.game_id = ? AND q.status IN ('closed', 'open')) - COUNT(a.id) as unanswered,
+      (SELECT a2.is_correct FROM answers a2
+        JOIN questions q2 ON q2.id = a2.question_id
+        WHERE a2.participant_id = p.id AND q2.game_id = p.game_id AND q2.is_tiebreak = 1
+        ORDER BY q2.question_order DESC, q2.id DESC LIMIT 1) as last_tiebreak_correct,
+      (SELECT a2.confirmed_at FROM answers a2
+        JOIN questions q2 ON q2.id = a2.question_id
+        WHERE a2.participant_id = p.id AND q2.game_id = p.game_id AND q2.is_tiebreak = 1
+        ORDER BY q2.question_order DESC, q2.id DESC LIMIT 1) as last_tiebreak_at
     FROM participants p
     LEFT JOIN answers a ON a.participant_id = p.id AND a.game_id = p.game_id
+    LEFT JOIN questions q ON q.id = a.question_id
     WHERE p.game_id = ?
     GROUP BY p.id
-    ORDER BY score DESC, correct DESC, p.created_at ASC
+    ORDER BY score DESC,
+      COALESCE(last_tiebreak_correct, -1) DESC,
+      CASE WHEN last_tiebreak_at IS NULL THEN 1 ELSE 0 END ASC,
+      last_tiebreak_at ASC
   `).bind(gid, gid).all();
 
   const list = results || [];
-  let rank = 0;
-  let prior = null;
   const ranked = [];
 
-  for (const item of list) {
-    const key = `${item.score}_${item.correct}`;
-    if (key !== prior) {
-      rank = ranked.length + 1;
-    }
-    item.position = rank;
+  for (const [index, item] of list.entries()) {
+    const prior = ranked[index - 1];
+    const sameRank = prior && prior.score === item.score &&
+      prior.last_tiebreak_correct === item.last_tiebreak_correct &&
+      prior.last_tiebreak_at === item.last_tiebreak_at;
+    item.position = sameRank ? prior.position : index + 1;
     ranked.push(item);
-    prior = key;
   }
   return ranked;
 }
@@ -172,9 +180,11 @@ export async function getGameState(db, gid, options = {}) {
   return data;
 }
 
-export async function isTopScoreTied(db, gid) {
+export async function hasUnresolvedLeaderboardTie(db, gid) {
   const leaders = await getLeaderboard(db, gid);
-  return leaders.length > 1 && leaders[0].score === leaders[1].score;
+  // Solo importa resolver empates que afecten a los tres puestos del podio,
+  // incluido el empate entre 3.º y 4.º que puede cambiar quién aparece.
+  return leaders.some((item, index) => index > 0 && index <= 3 && item.position === leaders[index - 1].position);
 }
 
 export async function addTiebreakQuestion(db, gid) {

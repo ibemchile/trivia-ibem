@@ -1,4 +1,4 @@
-import { verifyAdmin, getGameState, isTopScoreTied, addTiebreakQuestion, jsonResponse, errorResponse } from '../../_utils.js';
+import { verifyAdmin, getGameState, hasUnresolvedLeaderboardTie, addTiebreakQuestion, jsonResponse, errorResponse } from '../../_utils.js';
 
 export async function onRequestPost({ request, params, env }) {
   try {
@@ -68,7 +68,7 @@ export async function onRequestPost({ request, params, env }) {
       await env.DB.prepare("UPDATE questions SET status = 'closed' WHERE id = ?").bind(q.id).run();
 
       if (q.is_tiebreak || q.question_order >= game.round_size) {
-        const tied = await isTopScoreTied(env.DB, gid);
+        const tied = await hasUnresolvedLeaderboardTie(env.DB, gid);
         if (tied) {
           const added = await addTiebreakQuestion(env.DB, gid);
           if (!added) {
@@ -91,7 +91,7 @@ export async function onRequestPost({ request, params, env }) {
       const closedRegular = closedRes ? closedRes.cnt : 0;
 
       if (closedRegular >= game.round_size) {
-        const tied = await isTopScoreTied(env.DB, gid);
+        const tied = await hasUnresolvedLeaderboardTie(env.DB, gid);
         if (tied) {
           const added = await addTiebreakQuestion(env.DB, gid);
           if (!added) return errorResponse('No hay preguntas disponibles para el desempate.', 409);
