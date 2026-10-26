@@ -188,15 +188,23 @@ export async function hasUnresolvedLeaderboardTie(db, gid) {
 }
 
 export async function addTiebreakQuestion(db, gid) {
+  // 1. Intentar buscar una pregunta de dificultad Avanzada que no haya sido usada en esta partida
   let source = await db.prepare(`
-    SELECT * FROM questions WHERE game_id IS NULL AND id NOT IN
+    SELECT * FROM questions WHERE game_id IS NULL AND difficulty = 'Avanzada' AND id NOT IN
     (SELECT bank_id FROM questions WHERE game_id = ? AND bank_id IS NOT NULL)
     ORDER BY RANDOM() LIMIT 1
   `).bind(gid).first();
 
+  // 2. Si ya se usaron todas las avanzadas, permitir reutilizar una avanzada aleatoria del banco
+  if (!source) {
+    source = await db.prepare("SELECT * FROM questions WHERE game_id IS NULL AND difficulty = 'Avanzada' ORDER BY RANDOM() LIMIT 1").first();
+  }
+
+  // 3. Fallback absoluto por si no hubiera ninguna avanzada en el banco (opcional)
   if (!source) {
     source = await db.prepare("SELECT * FROM questions WHERE game_id IS NULL ORDER BY RANDOM() LIMIT 1").first();
   }
+
   if (!source) return false;
 
   const maxOrder = await db.prepare("SELECT COALESCE(MAX(question_order), 0) + 1 as nxt FROM questions WHERE game_id = ?").bind(gid).first();

@@ -48,8 +48,6 @@ export async function onRequestPost({ request, env }) {
     const confirmedAt = new Date().toISOString();
     let pointsAwarded = isCorrect;
     if (q.is_tiebreak) {
-      // Solo los participantes empatados al terminar la ronda compiten; en
-      // desempates sucesivos, siguen vivos quienes acertaron todos los previos.
       const baseline = await env.DB.prepare(`
         SELECT p.id, COALESCE(SUM(CASE WHEN tq.is_tiebreak = 0 THEN a.points_awarded ELSE 0 END), 0) AS score
         FROM participants p
