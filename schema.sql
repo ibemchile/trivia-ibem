@@ -140,7 +140,7 @@ INSERT INTO questions (game_id, question_text, option_a, option_b, option_c, opt
 VALUES (NULL, '¿Quién bautizó a Jesús según los evangelios?', 'Simón Pedro', 'Andrés el apóstol', 'Juan el Bautista', 'Felipe de Betsaida', 'C', 'Biblia', 'Básica', 'Los evangelios narran el bautismo de Jesús por Juan.', 'Marcos 1:9-11', 34, 'draft');
 
 INSERT INTO questions (game_id, question_text, option_a, option_b, option_c, option_d, correct_option, category, difficulty, explanation, source, question_order, status) 
-VALUES (NULL, '¿Cuál de estos es un fruto del Espíritu en Gálatas 5?', 'Ambición piadosa', 'Paciencia', 'Venganza justa', 'Rigor doctrinal', 'B', 'Biblia', 'Básica', 'Paciencia aparece en la lista del fruto del Espíritu.', 'Gálatas 5:22-23', 35, 'draft');
+VALUES (NULL, '¿Cuál de estos es un fruto del Espíritu en Gálatas 5?', 'Piedad', 'Paciencia', 'Generosidad', 'Rigor doctrinal', 'B', 'Biblia', 'Básica', 'Paciencia aparece en la lista del fruto del Espíritu.', 'Gálatas 5:22-23', 35, 'draft');
 
 INSERT INTO questions (game_id, question_text, option_a, option_b, option_c, option_d, correct_option, category, difficulty, explanation, source, question_order, status) 
 VALUES (NULL, '¿En qué libro se encuentra el Sermón del Monte?', 'Marcos', 'Lucas', 'Juan', 'Mateo', 'D', 'Biblia', 'Básica', 'El Sermón del Monte ocupa Mateo 5–7.', 'Mateo 5–7', 36, 'draft');
