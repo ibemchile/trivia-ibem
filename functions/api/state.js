@@ -32,6 +32,13 @@ export async function onRequestGet({ env, request }) {
     // Clonar para no mutar la caché compartida
     const response = JSON.parse(JSON.stringify(cached.data));
 
+    if (response.question?.is_tiebreak) {
+      const eligible = participantId ? await env.DB.prepare(
+        'SELECT 1 FROM tiebreak_eligibility WHERE question_id = ? AND participant_id = ?'
+      ).bind(response.question.id, participantId).first() : null;
+      if (!eligible) response.question = null;
+    }
+
     // Añadir respuesta personal del participante (dos SELECTs rápidos por índice)
     if (participantId && participantToken && response.question) {
       try {

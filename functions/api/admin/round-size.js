@@ -11,7 +11,7 @@ export async function onRequestPost({ request, env }) {
     const gid = parseInt(body.game_id, 10);
     const round_size = parseInt(body.round_size, 10);
 
-    if (![10, 15, 20].includes(round_size)) {
+    if (![5,10, 15, 20].includes(round_size)) {
       return errorResponse('La ronda debe tener 10, 15 o 20 preguntas.', 400);
     }
 

@@ -1,4 +1,5 @@
-import { verifyAdmin, getGameState, hasUnresolvedLeaderboardTie, addTiebreakQuestion, jsonResponse, errorResponse } from '../../_utils.js';
+import { verifyAdmin, getGameState, hasUnresolvedLeaderboardTie, addTiebreakQuestion, resolveTiebreakRound, jsonResponse, errorResponse } from '../../_utils.js';
+import { canFinishGame } from '../../_tiebreak.js';
 
 export async function onRequestPost({ request, params, env }) {
   try {
@@ -65,7 +66,12 @@ export async function onRequestPost({ request, params, env }) {
       if (!q || q.status !== 'open') {
         return errorResponse('No hay una pregunta abierta.', 409);
       }
-      await env.DB.prepare("UPDATE questions SET status = 'closed' WHERE id = ?").bind(q.id).run();
+      if (q.is_tiebreak) {
+        await resolveTiebreakRound(env.DB, q);
+      } else {
+        const closed = await env.DB.prepare("UPDATE questions SET status = 'closed' WHERE id = ? AND status = 'open'").bind(q.id).run();
+        if (!closed.meta?.changes) return errorResponse('La pregunta ya fue cerrada.', 409);
+      }
 
       if (q.is_tiebreak || q.question_order >= game.round_size) {
         const tied = await hasUnresolvedLeaderboardTie(env.DB, gid);
@@ -78,31 +84,21 @@ export async function onRequestPost({ request, params, env }) {
       }
 
     } else if (action === 'finish-game') {
-      if (q && q.status === 'open') {
-        await env.DB.prepare("UPDATE questions SET status = 'closed' WHERE id = ?").bind(q.id).run();
-      }
-
-      const pendingTie = await env.DB.prepare("SELECT 1 FROM questions WHERE game_id = ? AND is_tiebreak = 1 AND status = 'draft' LIMIT 1").bind(gid).first();
-      if (pendingTie) {
-        return errorResponse('Hay un empate. Inicia la pregunta de desempate antes de finalizar.', 409);
-      }
+      if (q && q.status !== 'closed') return errorResponse('Cierra la pregunta actual antes de finalizar.', 409);
 
       const closedRes = await env.DB.prepare("SELECT COUNT(*) as cnt FROM questions WHERE game_id = ? AND is_tiebreak = 0 AND status = 'closed'").bind(gid).first();
       const closedRegular = closedRes ? closedRes.cnt : 0;
 
-      if (closedRegular >= game.round_size) {
-        const tied = await hasUnresolvedLeaderboardTie(env.DB, gid);
-        if (tied) {
-          const added = await addTiebreakQuestion(env.DB, gid);
-          if (!added) return errorResponse('No hay preguntas disponibles para el desempate.', 409);
-          const stateData = await getGameState(env.DB, gid, { isAdmin: true });
-          return jsonResponse({
-            ok: true,
-            tiebreak_added: true,
-            message: 'Empate: se agregó una pregunta de desempate.',
-            state: stateData
-          });
-        }
+      if (closedRegular < game.round_size) return errorResponse('Completa las preguntas normales antes de finalizar.', 409);
+
+      const pending = await env.DB.prepare("SELECT 1 FROM questions WHERE game_id = ? AND is_tiebreak = 1 AND status IN ('draft','open') LIMIT 1").bind(gid).first();
+      const activeGroup = await env.DB.prepare("SELECT 1 FROM tiebreak_groups WHERE game_id = ? AND status = 'active' AND position_start <= 3 LIMIT 1").bind(gid).first();
+      const podiumTie = await hasUnresolvedLeaderboardTie(env.DB, gid);
+      if (!canFinishGame({ closedRegular, roundSize: game.round_size, pendingQuestion: Boolean(pending), activePodiumGroup: Boolean(activeGroup), podiumTie })) {
+        const added = await addTiebreakQuestion(env.DB, gid);
+        if (!added) return errorResponse('No hay preguntas disponibles para el desempate.', 409);
+        const stateData = await getGameState(env.DB, gid, { isAdmin: true });
+        return jsonResponse({ ok: true, tiebreak_added: true, message: 'El desempate sigue pendiente.', state: stateData });
       }
 
       await env.DB.prepare("UPDATE games SET status = 'finished', finished_at = CURRENT_TIMESTAMP WHERE id = ?").bind(gid).run();

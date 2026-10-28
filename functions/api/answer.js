@@ -1,4 +1,5 @@
 import { jsonResponse, errorResponse, getCookie, hashToken } from './_utils.js';
+import { shouldAwardPoints } from './_tiebreak.mjs';
 
 export async function onRequestPost({ request, env }) {
   try {
@@ -39,6 +40,11 @@ export async function onRequestPost({ request, env }) {
       return errorResponse('La pregunta está cerrada.', 409);
     }
 
+    if (q.is_tiebreak) {
+      const eligible = await env.DB.prepare('SELECT 1 FROM tiebreak_eligibility WHERE question_id = ? AND participant_id = ?').bind(q.id, p.id).first();
+      if (!eligible) return errorResponse('No estás participando en este desempate.', 403);
+    }
+
     const existingAns = await env.DB.prepare('SELECT 1 FROM answers WHERE question_id = ? AND participant_id = ?').bind(q.id, p.id).first();
     if (existingAns) {
       return errorResponse('Ya confirmaste una respuesta para esta pregunta.', 409);
@@ -46,34 +52,15 @@ export async function onRequestPost({ request, env }) {
 
     const isCorrect = choice === q.correct_option ? 1 : 0;
     const confirmedAt = new Date().toISOString();
-    let pointsAwarded = isCorrect;
-    if (q.is_tiebreak) {
-      const baseline = await env.DB.prepare(`
-        SELECT p.id, COALESCE(SUM(CASE WHEN tq.is_tiebreak = 0 THEN a.points_awarded ELSE 0 END), 0) AS score
-        FROM participants p
-        LEFT JOIN answers a ON a.participant_id = p.id AND a.game_id = p.game_id
-        LEFT JOIN questions tq ON tq.id = a.question_id
-        WHERE p.game_id = ? GROUP BY p.id
-      `).bind(game.id).all();
-      const scores = (baseline.results || []).map(row => row.score);
-      const topScore = Math.max(...scores, -1);
-      const tiedAtStart = (baseline.results || []).filter(row => row.score === topScore).map(row => row.id);
-      const previousTies = await env.DB.prepare(
-        "SELECT id FROM questions WHERE game_id = ? AND is_tiebreak = 1 AND question_order < ? ORDER BY question_order, id"
-      ).bind(game.id, q.question_order).all();
-      let eligible = tiedAtStart.includes(p.id);
-      for (const prior of (previousTies.results || [])) {
-        if (!eligible) break;
-        const priorAnswer = await env.DB.prepare(
-          'SELECT is_correct FROM answers WHERE question_id = ? AND participant_id = ?'
-        ).bind(prior.id, p.id).first();
-        eligible = Boolean(priorAnswer && priorAnswer.is_correct);
-      }
-      pointsAwarded = isCorrect && eligible ? 1 : 0;
-    }
-    await env.DB.prepare(
-      'INSERT INTO answers (game_id, question_id, participant_id, selected_option, confirmed_at, is_correct, points_awarded) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(game.id, q.id, p.id, choice, confirmedAt, isCorrect, pointsAwarded).run();
+    // Los desempates ordenan la disputa, pero nunca modifican la puntuación normal.
+    const pointsAwarded = shouldAwardPoints(Boolean(q.is_tiebreak), isCorrect);
+    const saved = await env.DB.prepare(`
+      INSERT INTO answers (game_id, question_id, participant_id, selected_option, confirmed_at, is_correct, points_awarded)
+      SELECT ?, ?, ?, ?, ?, ?, ?
+      WHERE EXISTS (SELECT 1 FROM questions WHERE id = ? AND status = 'open')
+        AND EXISTS (SELECT 1 FROM games WHERE id = ? AND current_question_id = ? AND status = 'running')
+    `).bind(game.id, q.id, p.id, choice, confirmedAt, isCorrect, pointsAwarded, q.id, game.id, q.id).run();
+    if (!saved.meta?.changes) return errorResponse('La pregunta está cerrada.', 409);
 
     return jsonResponse({ ok: true });
   } catch (err) {

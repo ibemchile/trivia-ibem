@@ -1,3 +1,5 @@
+import { findPodiumTie, partitionNeedsAnotherRound, splitTiebreakGroup } from './_tiebreak.mjs';
+
 // Helpers para cookies y sesiones en Cloudflare Workers / Pages Functions
 export function getCookie(request, name) {
   const cookieHeader = request.headers.get('Cookie');
@@ -68,43 +70,37 @@ export async function getActiveGame(db) {
 export async function getLeaderboard(db, gid) {
   const { results } = await db.prepare(`
     SELECT p.id, p.nickname,
-      COALESCE(SUM(a.points_awarded), 0) as score,
+      COALESCE(SUM(CASE WHEN q.is_tiebreak = 0 THEN a.points_awarded ELSE 0 END), 0) as score,
       COUNT(a.id) as answered,
       (SELECT COUNT(*) FROM questions q WHERE q.game_id = ? AND q.status IN ('closed', 'open')) - COUNT(a.id) as unanswered,
-      (SELECT a2.is_correct FROM answers a2
-        JOIN questions q2 ON q2.id = a2.question_id
-        WHERE a2.participant_id = p.id AND q2.game_id = p.game_id AND q2.is_tiebreak = 1
-        ORDER BY q2.question_order DESC, q2.id DESC LIMIT 1) as last_tiebreak_correct,
-      (SELECT a2.confirmed_at FROM answers a2
-        JOIN questions q2 ON q2.id = a2.question_id
-        WHERE a2.participant_id = p.id AND q2.game_id = p.game_id AND q2.is_tiebreak = 1
-        ORDER BY q2.question_order DESC, q2.id DESC LIMIT 1) as last_tiebreak_at
+      NULL as last_tiebreak_correct, NULL as last_tiebreak_at
     FROM participants p
     LEFT JOIN answers a ON a.participant_id = p.id AND a.game_id = p.game_id
     LEFT JOIN questions q ON q.id = a.question_id
     WHERE p.game_id = ?
     GROUP BY p.id
-    ORDER BY score DESC,
-      COALESCE(last_tiebreak_correct, -1) DESC,
-      CASE WHEN last_tiebreak_at IS NULL THEN 1 ELSE 0 END ASC,
-      last_tiebreak_at ASC
+    ORDER BY score DESC, p.created_at ASC, p.id ASC
   `).bind(gid, gid).all();
 
   const list = results || [];
+  const placementRows = await db.prepare(`
+    SELECT m.participant_id, g.position_start
+    FROM tiebreak_group_members m JOIN tiebreak_groups g ON g.id = m.group_id
+    WHERE g.game_id = ?
+      AND g.id = (SELECT MAX(g2.id) FROM tiebreak_group_members m2 JOIN tiebreak_groups g2 ON g2.id = m2.group_id WHERE m2.participant_id = m.participant_id AND g2.game_id = ?)
+  `).bind(gid, gid).all();
+  const placement = new Map((placementRows.results || []).map(row => [row.participant_id, row.position_start]));
   const ranked = [];
 
   for (const [index, item] of list.entries()) {
     const prior = ranked[index - 1];
-    // Dos jugadores ocupan la misma posición si tienen igual score
-    // Y el mismo resultado en el último desempate (correcto vs incorrecto).
-    // El tiempo de respuesta ordena en pantalla pero NO cambia la posición
-    // a efectos de determinar si hay empate que requiere nueva pregunta.
-    const sameRank = prior && prior.score === item.score &&
-      (prior.last_tiebreak_correct ?? -1) === (item.last_tiebreak_correct ?? -1);
-    item.position = sameRank ? prior.position : index + 1;
+    const rawPosition = prior && prior.score === item.score ? prior.rawPosition : index + 1;
+    item.rawPosition = rawPosition;
+    item.position = placement.get(item.id) || rawPosition;
     ranked.push(item);
   }
-  return ranked;
+  return ranked.sort((a, b) => a.position - b.position || b.score - a.score || a.nickname.localeCompare(b.nickname))
+    .map(({ rawPosition, ...item }) => item);
 }
 
 export async function getGameState(db, gid, options = {}) {
@@ -132,10 +128,17 @@ export async function getGameState(db, gid, options = {}) {
     } : null
   };
 
+  if (q?.is_tiebreak && participantId) {
+    const eligible = await db.prepare('SELECT 1 FROM tiebreak_eligibility WHERE question_id = ? AND participant_id = ?').bind(q.id, participantId).first();
+    if (!eligible) data.question = null;
+  }
+
   if (q && q.status === 'closed') {
-    data.question.correct_option = q.correct_option;
-    data.question.explanation = q.explanation;
-    data.question.source = q.source;
+    if (data.question) {
+      data.question.correct_option = q.correct_option;
+      data.question.explanation = q.explanation;
+      data.question.source = q.source;
+    }
   }
 
   // Verificar respuesta del participante si corresponde
@@ -158,9 +161,9 @@ export async function getGameState(db, gid, options = {}) {
         a.selected_option, a.confirmed_at
       FROM participants p
       LEFT JOIN answers a ON a.participant_id = p.id AND a.question_id = ?
-      WHERE p.game_id = ?
+      WHERE p.game_id = ? AND (? = 0 OR EXISTS (SELECT 1 FROM tiebreak_eligibility e WHERE e.question_id = ? AND e.participant_id = p.id))
       ORDER BY p.nickname_key
-    `).bind(q ? q.id : -1, gid).all();
+    `).bind(q ? q.id : -1, gid, q?.is_tiebreak ? 1 : 0, q ? q.id : -1).all();
 
     data.participants = participantsRes.results || [];
     data.answer_count = data.participants.filter(x => Boolean(x.selected_option)).length;
@@ -184,24 +187,70 @@ export async function getGameState(db, gid, options = {}) {
 }
 
 export async function hasUnresolvedLeaderboardTie(db, gid) {
+  const active = await db.prepare("SELECT 1 FROM tiebreak_groups WHERE game_id = ? AND status = 'active' AND position_start <= 3 LIMIT 1").bind(gid).first();
+  if (active) return true;
   const leaders = await getLeaderboard(db, gid);
-  if (leaders.length < 2) return false;
-
-  // Detecta empate "real" entre jugadores del podio (posiciones 1-3):
-  // dos jugadores empatan si tienen el mismo score Y el mismo resultado
-  // en la última pregunta de desempate (ambos correctos o ambos incorrectos).
-  // El tiempo de respuesta NO rompe el empate — solo ordena en pantalla.
-  const isRealTie = (a, b) =>
-    a.score === b.score &&
-    (a.last_tiebreak_correct ?? -1) === (b.last_tiebreak_correct ?? -1);
-
-  for (let i = 1; i < Math.min(leaders.length, 4); i++) {
-    if (isRealTie(leaders[i], leaders[i - 1])) return true;
+  for (let i = 0; i < leaders.length; i++) {
+    if (i + 1 > 3) break;
+    if (leaders[i + 1] && leaders[i].score === leaders[i + 1].score && leaders[i].position === leaders[i + 1].position) return true;
   }
   return false;
 }
 
+export async function resolveTiebreakRound(db, question) {
+  const group = await db.prepare('SELECT * FROM tiebreak_groups WHERE id = ? AND status = \'active\'').bind(question.tiebreak_group_id).first();
+  if (!group) {
+    await db.prepare("UPDATE questions SET status = 'closed' WHERE id = ? AND status = 'open'").bind(question.id).run();
+    return;
+  }
+  const memberRows = await db.prepare('SELECT participant_id FROM tiebreak_group_members WHERE group_id = ? AND active = 1 ORDER BY participant_id').bind(group.id).all();
+  const members = memberRows.results || [];
+  const answers = await db.prepare('SELECT participant_id, is_correct FROM answers WHERE question_id = ?').bind(question.id).all();
+  const resultByPlayer = new Map((answers.results || []).map(answer => [answer.participant_id, Number(answer.is_correct)]));
+  // No response is not a loss. Keep the whole group intact and ask again.
+  if (members.some(member => !resultByPlayer.has(member.participant_id))) {
+    await db.prepare("UPDATE questions SET status = 'closed' WHERE id = ? AND status = 'open'").bind(question.id).run();
+    return;
+  }
+  const partitions = splitTiebreakGroup(group, members, resultByPlayer);
+  if (!partitions) {
+    await db.prepare("UPDATE questions SET status = 'closed' WHERE id = ? AND status = 'open'").bind(question.id).run();
+    return; // unanimity leaves the dispute unresolved
+  }
+
+  const statements = [
+    db.prepare("UPDATE questions SET status = 'closed' WHERE id = ? AND status = 'open'").bind(question.id),
+    db.prepare("UPDATE tiebreak_groups SET status = 'resolved' WHERE id = ? AND status = 'active'").bind(group.id),
+    db.prepare('UPDATE tiebreak_group_members SET active = 0 WHERE group_id = ?').bind(group.id)
+  ];
+  for (const partition of partitions) {
+    const groupIsActive = partitionNeedsAnotherRound(partition);
+    statements.push(db.prepare("INSERT OR IGNORE INTO tiebreak_groups (game_id, position_start, position_end, status, parent_group_id) VALUES (?, ?, ?, ?, ?)")
+      .bind(group.game_id, partition.start, partition.end, groupIsActive ? 'active' : 'resolved', group.id));
+    for (const member of partition.members) {
+      statements.push(db.prepare(`INSERT OR IGNORE INTO tiebreak_group_members (group_id, participant_id, active)
+        SELECT id, ?, ? FROM tiebreak_groups WHERE parent_group_id = ? AND position_start = ? LIMIT 1`)
+        .bind(member.participant_id, groupIsActive ? 1 : 0, group.id, partition.start));
+    }
+  }
+  await db.batch(statements);
+}
+
 export async function addTiebreakQuestion(db, gid) {
+  const alreadyPending = await db.prepare("SELECT id FROM questions WHERE game_id = ? AND is_tiebreak = 1 AND status IN ('draft','open') LIMIT 1").bind(gid).first();
+  if (alreadyPending) return true;
+  let group = await db.prepare("SELECT id FROM tiebreak_groups WHERE game_id = ? AND status = 'active' AND position_start <= 3 ORDER BY position_start, id LIMIT 1").bind(gid).first();
+  if (!group) {
+    const leaders = await getLeaderboard(db, gid);
+    const tie = findPodiumTie(leaders);
+    if (!tie) return false;
+    const groupStatements = [db.prepare("INSERT OR IGNORE INTO tiebreak_groups (game_id, position_start, position_end, status) VALUES (?, ?, ?, 'active')").bind(gid, tie.start, tie.end)];
+    for (const player of tie.members) groupStatements.push(db.prepare(`INSERT OR IGNORE INTO tiebreak_group_members (group_id, participant_id, active)
+      SELECT id, ?, 1 FROM tiebreak_groups WHERE game_id = ? AND position_start = ? AND position_end = ? AND status = 'active' ORDER BY id DESC LIMIT 1`)
+      .bind(player.id, gid, tie.start, tie.end));
+    await db.batch(groupStatements);
+    group = await db.prepare("SELECT id FROM tiebreak_groups WHERE game_id = ? AND position_start = ? AND position_end = ? AND status = 'active' ORDER BY id DESC LIMIT 1").bind(gid, tie.start, tie.end).first();
+  }
   // 1. Intentar buscar una pregunta de dificultad Avanzada que no haya sido usada en esta partida
   let source = await db.prepare(`
     SELECT * FROM questions WHERE game_id IS NULL AND difficulty = 'Avanzada' AND id NOT IN
@@ -224,15 +273,21 @@ export async function addTiebreakQuestion(db, gid) {
   const maxOrder = await db.prepare("SELECT COALESCE(MAX(question_order), 0) + 1 as nxt FROM questions WHERE game_id = ?").bind(gid).first();
   const order = maxOrder ? maxOrder.nxt : 1;
 
-  await db.prepare(`
+  try { await db.batch([db.prepare(`
     INSERT INTO questions (
       game_id, bank_id, question_text, option_a, option_b, option_c, option_d,
-      correct_option, category, difficulty, explanation, source, question_order, status, is_tiebreak
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1)
+      correct_option, category, difficulty, explanation, source, question_order, status, is_tiebreak, tiebreak_group_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?)
   `).bind(
     gid, source.id, source.question_text, source.option_a, source.option_b, source.option_c, source.option_d,
-    source.correct_option, source.category, source.difficulty, source.explanation, source.source, order
-  ).run();
+    source.correct_option, source.category, source.difficulty, source.explanation, source.source, order, group.id
+  ), db.prepare(`INSERT INTO tiebreak_eligibility (question_id, participant_id)
+    SELECT q.id, m.participant_id FROM questions q JOIN tiebreak_group_members m ON m.group_id = q.tiebreak_group_id
+    WHERE q.game_id = ? AND q.question_order = ? AND q.is_tiebreak = 1`).bind(gid, order)]); } catch (err) {
+    const raced = await db.prepare("SELECT id FROM questions WHERE game_id = ? AND is_tiebreak = 1 AND status IN ('draft','open') LIMIT 1").bind(gid).first();
+    if (raced) return true;
+    throw err;
+  }
 
   return true;
 }

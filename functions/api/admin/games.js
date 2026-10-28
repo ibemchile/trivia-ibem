@@ -1,4 +1,4 @@
-import { verifyAdmin, jsonResponse, errorResponse } from '../_utils.js';
+import { verifyAdmin, jsonResponse, errorResponse, hasUnresolvedLeaderboardTie } from '../_utils.js';
 
 export async function onRequestPost({ request, env }) {
   try {
@@ -12,11 +12,22 @@ export async function onRequestPost({ request, env }) {
     const round_size = parseInt(body.round_size, 10) || 10;
 
     if (!name) return errorResponse('Escribe un nombre para la partida.', 400);
-    if (![10, 15, 20].includes(round_size)) return errorResponse('La ronda debe tener 10, 15 o 20 preguntas.', 400);
+    if (![5, 10, 15, 20].includes(round_size)) return errorResponse('La ronda debe tener 10, 15 o 20 preguntas.', 400);
 
     // Finalizar partidas anteriores abiertas
     const previousGames = await env.DB.prepare("SELECT id, current_question_id FROM games WHERE status != 'finished'").all();
     for (const prev of previousGames.results || []) {
+      const previous = await env.DB.prepare('SELECT status, round_size FROM games WHERE id = ?').bind(prev.id).first();
+      if (previous.status === 'running') {
+        const current = prev.current_question_id ? await env.DB.prepare('SELECT status, is_tiebreak FROM questions WHERE id = ?').bind(prev.current_question_id).first() : null;
+        if (current?.status === 'open') return errorResponse('Cierra la pregunta actual antes de crear otra partida.', 409);
+        const pendingTie = await env.DB.prepare("SELECT 1 FROM questions WHERE game_id = ? AND is_tiebreak = 1 AND status = 'draft' LIMIT 1").bind(prev.id).first();
+        if (pendingTie || await hasUnresolvedLeaderboardTie(env.DB, prev.id)) {
+          return errorResponse('Resuelve los desempates del podio antes de crear otra partida.', 409);
+        }
+        const closed = await env.DB.prepare("SELECT COUNT(*) AS n FROM questions WHERE game_id = ? AND is_tiebreak = 0 AND status = 'closed'").bind(prev.id).first();
+        if (closed.n < previous.round_size) return errorResponse('Completa la ronda actual antes de crear otra partida.', 409);
+      }
       if (prev.current_question_id) {
         await env.DB.prepare("UPDATE questions SET status = 'closed' WHERE id = ? AND status = 'open'").bind(prev.current_question_id).run();
       }

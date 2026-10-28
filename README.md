@@ -34,6 +34,7 @@ Ejecuta el script SQL con el esquema y el banco inicial de preguntas:
 
 ```bash
 npx wrangler d1 execute trivia-db --local --file=schema.sql
+npx wrangler d1 migrations apply trivia-db --local
 ```
 
 ### 3. Iniciar el servidor de desarrollo
@@ -51,6 +52,14 @@ Rutas locales:
 
 *(Credenciales de prueba local: Usuario `admin`, Contraseña `admin123`)*.
 
+### Pruebas de desempates
+
+Ejecuta las pruebas de reglas con Node.js 18 o superior:
+
+```bash
+node tests/tiebreak.test.mjs
+```
+
 ---
 
 ## ☁️ Despliegue en Cloudflare Pages
@@ -58,8 +67,8 @@ Rutas locales:
 ### Paso 1: Crear la Base de Datos D1
 1. En el panel de Cloudflare, ve a **Storage & databases** > **D1 SQL Database** > **Create database**.
 2. Nómbrala `trivia-db`.
-3. Ve a la pestaña **Console** de `trivia-db` en el dashboard web y pega todo el contenido de [`schema.sql`](schema.sql), luego pulsa **Execute**.
-   *(Alternativa por terminal: `npx wrangler d1 execute trivia-db --remote --file=schema.sql`)*.
+3. Inicializa la base con [`schema.sql`](schema.sql), luego aplica las migraciones.
+   *(Terminal: `npx wrangler d1 execute trivia-db --remote --file=schema.sql` seguido de `npx wrangler d1 migrations apply trivia-db --remote`)*.
 
 ### Paso 2: Crear el Proyecto en Pages
 1. Ve a **Workers & Pages** > **Create application** > pestaña **Pages** > **Connect to Git**.
@@ -69,6 +78,16 @@ Rutas locales:
    - **Build command:** *(dejar vacío)*
    - **Build output directory:** `public`
 4. Pulsa **Save and Deploy**.
+
+### Migración de una base D1 existente
+
+Aplica la migración antes de desplegar el código actualizado:
+
+```bash
+npx wrangler d1 migrations apply trivia-db --remote
+```
+
+Para el entorno local usa `--local`. En una base nueva ejecuta primero `schema.sql` y luego aplica la migración como se indica arriba.
 
 ### Paso 3: Configurar Bindings y Variables
 En el panel del proyecto en Cloudflare Pages:
@@ -93,7 +112,7 @@ En el panel del proyecto en Cloudflare Pages:
    - Pulsa **Iniciar pregunta** para abrirla a los jugadores.
    - Los participantes eligen una alternativa y confirman.
    - Pulsa **Cerrar pregunta** para bloquear respuestas y revelar la correcta con su explicación bíblica/histórica.
-5. **Desempate automático:** Si un empate afecta al podio, el sistema añade otra pregunta cuando los participantes empatados también coinciden en el resultado y tiempo de su último desempate. Esto incluye un empate entre el 3.º y 4.º puesto, porque afecta quién aparece en el podio.
+5. **Desempate automático:** Las preguntas se asignan al grupo que disputa una posición del podio. Aciertos y fallos separan ese grupo en subgrupos para puestos superiores e inferiores; una ronda unánime mantiene el empate. Las ausencias no eliminan participantes y las respuestas de desempate no suman puntos normales.
 6. **Finalización y Podio:** Al pulsar **Finalizar partida**, la pantalla de participantes y la proyección muestran el podio animado con los ganadores.
 
 ---
