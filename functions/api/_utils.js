@@ -95,9 +95,12 @@ export async function getLeaderboard(db, gid) {
 
   for (const [index, item] of list.entries()) {
     const prior = ranked[index - 1];
+    // Dos jugadores ocupan la misma posición si tienen igual score
+    // Y el mismo resultado en el último desempate (correcto vs incorrecto).
+    // El tiempo de respuesta ordena en pantalla pero NO cambia la posición
+    // a efectos de determinar si hay empate que requiere nueva pregunta.
     const sameRank = prior && prior.score === item.score &&
-      prior.last_tiebreak_correct === item.last_tiebreak_correct &&
-      prior.last_tiebreak_at === item.last_tiebreak_at;
+      (prior.last_tiebreak_correct ?? -1) === (item.last_tiebreak_correct ?? -1);
     item.position = sameRank ? prior.position : index + 1;
     ranked.push(item);
   }
@@ -182,9 +185,20 @@ export async function getGameState(db, gid, options = {}) {
 
 export async function hasUnresolvedLeaderboardTie(db, gid) {
   const leaders = await getLeaderboard(db, gid);
-  // Solo importa resolver empates que afecten a los tres puestos del podio,
-  // incluido el empate entre 3.º y 4.º que puede cambiar quién aparece.
-  return leaders.some((item, index) => index > 0 && index <= 3 && item.position === leaders[index - 1].position);
+  if (leaders.length < 2) return false;
+
+  // Detecta empate "real" entre jugadores del podio (posiciones 1-3):
+  // dos jugadores empatan si tienen el mismo score Y el mismo resultado
+  // en la última pregunta de desempate (ambos correctos o ambos incorrectos).
+  // El tiempo de respuesta NO rompe el empate — solo ordena en pantalla.
+  const isRealTie = (a, b) =>
+    a.score === b.score &&
+    (a.last_tiebreak_correct ?? -1) === (b.last_tiebreak_correct ?? -1);
+
+  for (let i = 1; i < Math.min(leaders.length, 4); i++) {
+    if (isRealTie(leaders[i], leaders[i - 1])) return true;
+  }
+  return false;
 }
 
 export async function addTiebreakQuestion(db, gid) {

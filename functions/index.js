@@ -1,5 +1,6 @@
 // Entrypoint para Cloudflare Worker con Assets estáticos y rutas /api/
 import * as stateEndpoint from './api/state.js';
+import * as heartbeatEndpoint from './api/heartbeat.js';
 import * as registerEndpoint from './api/register.js';
 import * as answerEndpoint from './api/answer.js';
 import * as adminLogin from './api/admin/login.js';
@@ -25,6 +26,9 @@ export default {
 
       if (pathname === '/api/state' && method === 'GET') {
         return stateEndpoint.onRequestGet({ request, env, ctx });
+      }
+      if (pathname === '/api/heartbeat' && method === 'POST') {
+        return heartbeatEndpoint.onRequestPost({ request, env, ctx });
       }
       if (pathname === '/api/register' && method === 'POST') {
         return registerEndpoint.onRequestPost({ request, env, ctx });

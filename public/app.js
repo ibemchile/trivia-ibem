@@ -74,8 +74,10 @@ async function participantPage() {
     $('#player-name').textContent = playerName;
     refresh();
     if (!pollingInterval) {
-      pollingInterval = setInterval(refresh, 1500);
+      pollingInterval = setInterval(refresh, 3000); // cada 3 segundos
     }
+    // Heartbeat cada 30 segundos (solo actualiza last_seen_at en D1)
+    setInterval(() => api('/api/heartbeat', {}).catch(() => {}), 30000);
   }
 
   async function refresh() {
@@ -192,7 +194,7 @@ async function adminPage() {
 
   function startPolling() {
     if (!pollingInterval) {
-      pollingInterval = setInterval(refresh, 2000);
+      pollingInterval = setInterval(refresh, 5000); // cada 5 segundos para el admin
     }
   }
 
@@ -489,7 +491,7 @@ async function projectionPage() {
   }
 
   refresh();
-  setInterval(refresh, 2500);
+  setInterval(refresh, 5000); // cada 5 segundos para proyección
 }
 
 document.addEventListener('DOMContentLoaded', () => {

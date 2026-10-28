@@ -1,4 +1,8 @@
-import { getActiveGame, getGameState, jsonResponse, errorResponse, getCookie } from './_utils.js';
+import { getActiveGame, getGameState, jsonResponse, errorResponse, getCookie, hashToken } from './_utils.js';
+
+// Caché en memoria del Edge: clave gameId → {data, expiresAt}
+const stateCache = new Map();
+const CACHE_TTL_MS = 2000; // 2 segundos
 
 export async function onRequestGet({ env, request }) {
   try {
@@ -7,23 +11,47 @@ export async function onRequestGet({ env, request }) {
       return errorResponse('Partida no encontrada', 404);
     }
 
+    const gid = game.id;
     const participantId = getCookie(request, 'participant_id');
     const participantToken = getCookie(request, 'participant_token');
 
-    // Registrar heartbeat (last_seen_at) para que la pantalla del admin vea activo al jugador
-    if (participantId) {
+    // La parte pública del estado (pregunta activa, status del juego) es
+    // idéntica para todos los participantes → se sirve desde caché del edge.
+    // La respuesta personal (my_answer) se añade encima sin ir a D1 extra.
+    const cacheKey = `state:${gid}`;
+    const now = Date.now();
+    let cached = stateCache.get(cacheKey);
+
+    if (!cached || now > cached.expiresAt) {
+      // Caché expirada o inexistente → consultar D1
+      const freshData = await getGameState(env.DB, gid, { isAdmin: false });
+      cached = { data: freshData, expiresAt: now + CACHE_TTL_MS };
+      stateCache.set(cacheKey, cached);
+    }
+
+    // Clonar para no mutar la caché compartida
+    const response = JSON.parse(JSON.stringify(cached.data));
+
+    // Añadir respuesta personal del participante (dos SELECTs rápidos por índice)
+    if (participantId && participantToken && response.question) {
       try {
-        await env.DB.prepare("UPDATE participants SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(participantId).run();
+        const pRow = await env.DB.prepare(
+          'SELECT token_hash FROM participants WHERE id = ? AND game_id = ?'
+        ).bind(participantId, gid).first();
+
+        if (pRow) {
+          const hashed = await hashToken(participantToken);
+          if (pRow.token_hash === hashed) {
+            const myAns = await env.DB.prepare(
+              'SELECT selected_option FROM answers WHERE question_id = ? AND participant_id = ?'
+            ).bind(response.question.id, participantId).first();
+            response.my_answer = myAns ? myAns.selected_option : null;
+          }
+        }
       } catch (e) {}
     }
 
-    const data = await getGameState(env.DB, game.id, {
-      isAdmin: false,
-      participantId,
-      participantToken
-    });
-
-    return jsonResponse(data);
+    return jsonResponse(response);
   } catch (err) {
     return errorResponse(err.message, 500);
   }
